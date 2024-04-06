@@ -111,19 +111,19 @@ struct Config {
 
 #[test]
 fn with_limit() {
-    let _ = Config::build().complete();
+    let config = Config::build().validate(true);
     //     .size(25)
     //     .validate(false)
     //     .limit(100)
     //     .path("path".into());
-    //
-    // assert_eq!(
-    //     config,
-    //     Config {
-    //         path: "path".into(),
-    //         size: 25,
-    //         validate: false,
-    //         limit: 100.into()
-    //     }
-    // );
+
+    assert_eq!(
+        config,
+        Config {
+            validate: true,
+            //         path: "path".into(),
+            //         size: 25,
+            //         limit: 100.into()
+        }
+    );
 }
