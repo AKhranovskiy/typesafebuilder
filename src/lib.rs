@@ -20,7 +20,7 @@ pub fn derive_typed_builder(input: proc_macro::TokenStream) -> proc_macro::Token
             Fields::Named(ref fields) => {
                 (build_fn(&name, fields), builder_impl(&name, vis, fields))
             }
-            Fields::Unnamed(_) => todo!(),
+            Fields::Unnamed(_) => unimplemented!("Structs with unnamed fields are not supported"),
             Fields::Unit => (
                 quote! {
                     pub fn build() -> Self { Self{} }
@@ -28,15 +28,14 @@ pub fn derive_typed_builder(input: proc_macro::TokenStream) -> proc_macro::Token
                 quote!(),
             ),
         },
-        Data::Enum(_) => todo!(),
-        Data::Union(_) => todo!(),
+        Data::Enum(_) => unimplemented!("Enums are not supported"),
+        Data::Union(_) => unimplemented!("Unions are not supported"),
     };
 
     let expanded = quote! {
         impl #name {
             #fn_build
         }
-
         #builder
     };
 
@@ -79,36 +78,32 @@ fn builder_impl(name: &Ident, vis: Visibility, fields: &FieldsNamed) -> TokenStr
         return quote! {};
     }
 
-    let builder_name = builder_name(name);
-
     if fields.named.iter().any(|f| is_option(&f.ty)) {
-        unimplemented!("Optional fields not implemented");
+        unimplemented!("Optional fields are not supported");
     }
 
-    let decl_generics = fields
-        .named
-        .iter()
-        .map(|f| {
+    let builder_name = builder_name(name);
+
+    let builder_decl = {
+        let decl_generics = fields.named.iter().map(|f| {
             let ident = f.flag();
             quote! { const #ident: bool = false }
-        })
-        .chain(std::iter::once(quote! { const COMPLETE: bool = false }));
+        });
 
-    let builder_fields = fields.named.iter().map(|f| {
-        let ident = &f.ident;
-        let ty = &f.ty;
-        quote_spanned! {f.span()=> #ident: Option<#ty> }
-    });
+        quote! { #builder_name<#(#decl_generics),*> }
+    };
 
-    let inner_name = format_ident!("_{}Inner", builder_name);
+    let (inner_name, inner_decl, inner_init) = inner(&builder_name, fields);
 
     let setters = match fields.named.len() {
         0 => {
-            quote! {}
+            unreachable!("No builder for empty structs")
         }
         1 => {
-            let ident = fields.named.first().and_then(|f| f.ident.as_ref()).unwrap();
-            let ty = &fields.named.first().map(|f| &f.ty).unwrap();
+            let field = fields.named.first().unwrap();
+            let ident = &field.ident;
+            let ty = &field.ty;
+
             quote! {
                 impl #builder_name {
                     #vis fn #ident(self, value: #ty) -> #name {
@@ -121,71 +116,103 @@ fn builder_impl(name: &Ident, vis: Visibility, fields: &FieldsNamed) -> TokenStr
         }
         _ => {
             let setters = fields.named.iter().map(|current_field| {
-                let flag_names = fields
-                    .named
-                    .iter()
-                    .filter(|field| field.ident != current_field.ident)
-                    .map(|field| {
-                        let ident = field.flag();
-                        quote! { const #ident: bool }
+                // Flags declarations except the current field.
+                // `impl<const B: bool, const C: bool>`
+                let flag_names = {
+                    let flag_names = fields
+                        .named
+                        .iter()
+                        .filter(|field| field.ident != current_field.ident)
+                        .map(|field| {
+                            let ident = field.flag();
+                            quote! { const #ident: bool }
+                        });
+
+                    quote! { #(#flag_names),* }
+                };
+
+                // impl specialization
+                // `Foo<false, B, C>`
+                let input_flags = {
+                    let input_flags = fields.named.iter().map(|field| {
+                        if field.ident == current_field.ident {
+                            quote! { false }
+                        } else {
+                            let ident = field.flag();
+                            quote! { #ident }
+                        }
                     });
-                let flag_names = quote! { #(#flag_names),* };
 
-                let input_flags = fields.named.iter().map(|field| {
-                    if field.ident == current_field.ident {
-                        quote! { false }
-                    } else {
-                        let ident = field.flag();
-                        quote! { #ident }
-                    }
-                });
-                let input_flags = quote! { #(#input_flags),* };
+                    quote! { #(#input_flags),* }
+                };
 
-                let output_flags = fields.named.iter().map(|field| {
-                    if field.ident == current_field.ident {
-                        quote! { true }
-                    } else {
-                        let ident = field.flag();
-                        quote! { #ident }
-                    }
-                });
-                let output_flags = quote! { #(#output_flags),* };
-
-                let flags = fields
-                    .named
-                    .iter()
-                    .filter(|field| field.ident != current_field.ident)
-                    .map(|field| {
-                        let ident = field.flag();
-                        quote! { #ident }
+                // Output builder flags
+                // `FooBuilder<true, B, C>`
+                let output_flags = {
+                    let output_flags = fields.named.iter().map(|field| {
+                        if field.ident == current_field.ident {
+                            quote! { true }
+                        } else {
+                            let ident = field.flag();
+                            quote! { #ident }
+                        }
                     });
-                let flags = quote! { #(#flags)&* };
-                let complete_flags = fields.named.iter().map(|field| {
-                    if field.ident == current_field.ident {
-                        quote! { false }
-                    } else {
-                        quote! { true }
-                    }
-                });
-                let complete_flags = quote! { #(#complete_flags),* };
+
+                    quote! { #(#output_flags),* }
+                };
+
+                // Flag condition for impl specialization
+                // `B & C`
+                let flag_condition = {
+                    let flags = fields
+                        .named
+                        .iter()
+                        .filter(|field| field.ident != current_field.ident)
+                        .map(|field| {
+                            let ident = field.flag();
+                            quote! { #ident }
+                        });
+
+                    quote! { #(#flags)&* }
+                };
+
+                // All flags set to true except the current.
+                // Final specialization.
+                let complete_flags = {
+                    let complete_flags = fields.named.iter().map(|field| {
+                        if field.ident == current_field.ident {
+                            quote! { false }
+                        } else {
+                            quote! { true }
+                        }
+                    });
+
+                    quote! { #(#complete_flags),* }
+                };
 
                 let boolean_name = format_ident!("{name}Boolean");
                 let false_trait_name = format_ident!("{name}False");
+
                 let ident = current_field.ident.as_ref();
                 let ty = &current_field.ty;
 
-                let move_fields = fields
-                    .named
-                    .iter()
-                    .filter(|field| field.ident != current_field.ident)
-                    .map(|f| {
-                        let ident = f.ident.as_ref().unwrap();
-                        quote! { #ident: self.inner.#ident.unwrap() }
-                    });
+                let move_fields = {
+                    let move_fields = fields
+                        .named
+                        .iter()
+                        .filter(|field| field.ident != current_field.ident)
+                        .map(|f| {
+                            let ident = f.ident.as_ref().unwrap();
+                            quote! { #ident: self.inner.#ident.unwrap() }
+                        });
+
+                    quote! { #(#move_fields),* }
+                };
 
                 quote! {
+                    // Conditional implementation where some flags are not set.
                     impl<#flag_names> #builder_name<#input_flags>
-                    where #boolean_name<{#flags}>: #false_trait_name
+                    where #boolean_name<{#flag_condition}>: #false_trait_name
                     {
                         pub fn #ident(self, value: #ty) -> #builder_name<#output_flags> {
                             #builder_name::<#output_flags> {
@@ -196,11 +223,12 @@ fn builder_impl(name: &Ident, vis: Visibility, fields: &FieldsNamed) -> TokenStr
                             }
                         }
                     }
+                    // Final implementation where all flags except the current are set.
                     impl #builder_name<#complete_flags>{
                         pub fn #ident(self, value: #ty) -> #name {
                             #name {
                                 #ident: value,
-                                #(#move_fields),*
+                                #move_fields
                             }
                         }
                     }
@@ -212,20 +240,6 @@ fn builder_impl(name: &Ident, vis: Visibility, fields: &FieldsNamed) -> TokenStr
             }
         }
     };
-
-    let inner = if fields.named.len() < 2 {
-        quote! {}
-    } else {
-        quote! {
-            #[doc(hidden)]
-            #[derive(Debug, Clone, Default)]
-            struct #inner_name {
-                #(#builder_fields),*
-            }
-        }
-    };
-
-    let builder_decl = quote! { #builder_name<#(#decl_generics),*> };
 
     let builder = match fields.named.len() {
         0 => unreachable!(),
@@ -247,36 +261,11 @@ fn builder_impl(name: &Ident, vis: Visibility, fields: &FieldsNamed) -> TokenStr
         }
     };
 
-    let builder_init = match fields.named.len() {
-        0 => unreachable!(),
-        1 => {
-            quote! {}
-        }
-        _ => {
-            quote! { inner: Default::default() }
-        }
-    };
-
-    let boolean = {
-        let boolean_name = format_ident!("{name}Boolean");
-        let true_name = format_ident!("{name}True");
-        let false_name = format_ident!("{name}False");
-        quote! {
-            #[doc(hidden)]
-            #vis struct #boolean_name<const B: bool>;
-            #[doc(hidden)]
-            #vis trait #true_name {}
-            #[doc(hidden)]
-            #vis trait #false_name {}
-            impl #true_name for #boolean_name<true> {}
-            impl #false_name for #boolean_name<false> {}
-        }
-    };
+    let boolean = boolean(vis, name);
 
     quote! {
-        #boolean
+        #inner_decl
 
-        #inner
         #builder
 
         impl #builder_name {
@@ -284,12 +273,56 @@ fn builder_impl(name: &Ident, vis: Visibility, fields: &FieldsNamed) -> TokenStr
             #[doc(hidden)]
             fn __init() -> Self {
                 Self {
-                    #builder_init
+                    #inner_init
                 }
             }
         }
 
+        #boolean
+
         #setters
+    }
+}
+
+fn inner(builder_name: &Ident, fields: &FieldsNamed) -> (Ident, TokenStream, TokenStream) {
+    let inner_name = format_ident!("_{builder_name}Inner");
+
+    let inner_fields = fields.named.iter().map(|f| {
+        let ident = &f.ident;
+        let ty = &f.ty;
+        quote_spanned! {f.span()=> #ident: Option<#ty> }
+    });
+
+    match fields.named.len() {
+        0 => unreachable!(),
+        1 => (inner_name, quote! {}, quote! {}),
+        _ => (
+            inner_name.clone(),
+            quote! {
+                #[doc(hidden)]
+                #[derive(Debug, Clone, Default)]
+                struct #inner_name {
+                    #(#inner_fields),*
+                }
+            },
+            quote! { inner: Default::default() },
+        ),
+    }
+}
+
+fn boolean(vis: Visibility, name: &Ident) -> TokenStream {
+    let boolean_name = format_ident!("{name}Boolean");
+    let true_name = format_ident!("{name}True");
+    let false_name = format_ident!("{name}False");
+    quote! {
+        #[doc(hidden)]
+        #vis struct #boolean_name<const B: bool>;
+        #[doc(hidden)]
+        #vis trait #true_name {}
+        #[doc(hidden)]
+        #vis trait #false_name {}
+        impl #true_name for #boolean_name<true> {}
+        impl #false_name for #boolean_name<false> {}
     }
 }
 
