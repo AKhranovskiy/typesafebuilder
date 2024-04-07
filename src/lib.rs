@@ -8,8 +8,8 @@ use syn::{
     Type, Visibility,
 };
 
-#[proc_macro_derive(TypedBuilder)]
-pub fn derive_typed_builder(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+#[proc_macro_derive(TypeSafeBuilder)]
+pub fn derive_typesafe_builder(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
 
     let name = input.ident;

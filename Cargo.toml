@@ -1,5 +1,5 @@
 [package]
-name = "typesafe"
+name = "typesafebuilder"
 version = "0.1.0"
 edition = "2021"
 

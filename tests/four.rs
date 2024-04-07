@@ -1,9 +1,9 @@
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
-use typesafe::TypedBuilder;
+use typesafebuilder::TypeSafeBuilder;
 
-#[derive(Debug, PartialEq, Eq, TypedBuilder)]
+#[derive(Debug, PartialEq, Eq, TypeSafeBuilder)]
 struct Four {
     first: bool,
     second: u32,
