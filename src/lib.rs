@@ -21,7 +21,12 @@ pub fn derive_typed_builder(input: proc_macro::TokenStream) -> proc_macro::Token
                 (build_fn(&name, fields), builder_impl(&name, vis, fields))
             }
             Fields::Unnamed(_) => todo!(),
-            Fields::Unit => todo!(),
+            Fields::Unit => (
+                quote! {
+                    pub fn build() -> Self { Self{} }
+                },
+                quote!(),
+            ),
         },
         Data::Enum(_) => todo!(),
         Data::Union(_) => todo!(),
@@ -259,9 +264,11 @@ fn builder_impl(name: &Ident, vis: Visibility, fields: &FieldsNamed) -> TokenStr
         quote! {
             #[doc(hidden)]
             #vis struct #boolean_name<const B: bool>;
+            #[doc(hidden)]
             #vis trait #true_name {}
-            impl #true_name for #boolean_name<true> {}
+            #[doc(hidden)]
             #vis trait #false_name {}
+            impl #true_name for #boolean_name<true> {}
             impl #false_name for #boolean_name<false> {}
         }
     };

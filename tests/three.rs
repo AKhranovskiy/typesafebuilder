@@ -3,7 +3,7 @@
 
 use typesafe::TypedBuilder;
 
-#[derive(Debug, Clone, PartialEq, Eq, TypedBuilder)]
+#[derive(Debug, PartialEq, Eq, TypedBuilder)]
 struct Three {
     first: bool,
     second: u32,
