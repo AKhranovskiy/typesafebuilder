@@ -2,6 +2,11 @@
 name = "typesafebuilder"
 version = "0.1.0"
 edition = "2021"
+authors = ["Andrey Khranovsky <andrey.khranovsky@gmail.com>"]
+license = "MIT"
+description = "Typesafe builder for structs"
+repository = "https://github.com/AKhranovskiy/typesafebuilder"
+readme = "README.md"
 
 [lib]
 proc-macro = true
